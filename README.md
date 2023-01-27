@@ -9,46 +9,34 @@ Let’s look at an example:
 ```
 pragma solidity^0.8.17;
 
-
 library Lib {
-
 
     // sets the storgae variable to a new value
     function changeState(uint256[1] storage changeMe) public {
         changeMe[0] = 1;
     }
 
-
 }
 
-
 contract C {
-
 
     // stateVariable[0] initialized to 0
     uint256[1] stateVariable;
 
-
     function callChangeState() external returns (uint256[1] memory, uint256[1] memory){
-
 
         // stores state variable to memory so we can return it later
         uint256[1] memory _oldState = stateVariable;
 
-
         // calls our library function
         Lib.changeState(stateVariable);
-
 
         // stores our new state variable to memory so we can return it
         uint256[1] memory _newState = stateVariable;
 
-
         return (_oldState, _newState);
 
-
     }
-
 
 }
 ```
@@ -111,7 +99,6 @@ Now in our contract C, we will add this piece of code.
 ```
 using { Lib.square }  for uint256;
 
-
 function testUsing() external returns(uint256) {
    return uint256(5).square();
 }
@@ -120,23 +107,16 @@ Nothing crazy here, our output will be 25 as expected. Let’s see what happens 
 ```
 using Lib  for *;
 
-
 function testUsing() external returns(uint256) {
-
 
     // calls square() on 5
     uint256 callsSquare = uint256(5).square();
 
-
     // changes our storage variable to 1
     stateVariable.changeState();
 
-
     // throws an error
     stateVariable.square(); // comment out
-
-
-
 
     return  stateVariable[0] + callsSquare;
 }
