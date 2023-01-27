@@ -100,5 +100,101 @@ function getSignature() external pure returns(bytes4) {
 
 
 ## Using For
+A nice feature of libraries is ```using x for y```. This allows you to attach type y to function x. The first parameter must match the type you are attempting to attach it to or else the compiler will throw an error. You can specify multiple functions for a type like so, ```using { Lib.func1, Lib.func2 } for uint256```. Additionally, you can specify an entire library for all types with the following syntax ```using Lib for *``` This does not allow you to call any function on any type. The type of the first parameter still has to match the type of the variable you are using. This just makes it easier for you, so you don't have to keep using ```using x for y```. 
+Let’s take a look at some examples. Add the following function to our library.
+``` 
+function square(uint256 _val) public pure returns (uint256){
+   return _val * _val;
+}
+```
+Now in our contract C, we will add this piece of code.
+```
+using { Lib.square }  for uint256;
+
+
+function testUsing() external returns(uint256) {
+   return uint256(5).square();
+}
+```
+Nothing crazy here, our output will be 25 as expected. Let’s see what happens if we try to assign our library to all variables.
+```
+using Lib  for *;
+
+
+function testUsing() external returns(uint256) {
+
+
+    // calls square() on 5
+    uint256 callsSquare = uint256(5).square();
+
+
+    // changes our storage variable to 1
+    stateVariable.changeState();
+
+
+    // throws an error
+    stateVariable.square(); // comment out
+
+
+
+
+    return  stateVariable[0] + callsSquare;
+}
+```
+If you try to run this function as is, you will get an error saying ```square()``` is not visible. This is because we are attaching ```square()``` to a variable that is not a ```uint256```. Ok, let’s comment out that line now and try running it again. Great, 26 is our output! We get it by squaring 5 (25), then changing our state variable to 1 and summing both of them.
+
+Our last topic for this section will be covering using ```global```. ```global``` allows us to attach libraries to custom data types (like structs) even if the contracts are located in different files. Let’s look at an example. First say we have file ```globalTest1.sol```:
+```
+pragma solidity^0.8.17;
+
+// our custom data type
+struct DataType {
+    uint256 var1;
+    uint256 var2;
+}
+
+// our library that performs an operation on our custom data type
+library Lib {
+
+    function sumDataType(DataType memory _data) internal pure returns (uint256) {
+        return _data.var1 + _data.var2;
+    }
+
+}
+
+// attaching our library to this custom data type
+using { Lib.sumDataType } for DataType global;
+
+contract C1 {
+    // simple function inside our file that demonstrates it works
+    function getResult() external view returns(uint256) {
+        DataType memory data = DataType(1,2);
+        return data.sumDataType();
+    }
+}
+
+```
+Also let's say we have a separate file called ```globalTest2.sol``` that looks like this.
+```
+pragma solidity^0.8.17;
+
+// import ONLY our custom data type
+import { DataType } from "./globalTest1.sol";
+
+contract C2 {
+    // simple function to verify it works properly
+    function getResult() external view returns(uint256) {
+        DataType memory data = DataType(3,4);
+        return data.sumDataType();
+    }
+}
+```
+If we call ```getResult()``` in both contract we will get the following output: <br>
+```C1.getResult()```: 3 <br>
+```C2.getResult()```: 7 <br>
+
+Notice we are ONLY importing our custom data type from ```globalTest1.sol```. However, we still get to use our library because we attached it globally.
+
+This wraps up the section on ```use for```. Next we will begin to look at the process of creating our own library!
 
 
