@@ -177,4 +177,161 @@ Notice we are ONLY importing our custom data type from ```globalTest1.sol```. Ho
 
 This wraps up the section on ```use for```. Next we will begin to look at the process of creating our own library!
 
+## Writing a Library
+To make sure I had a good grasp of libraries before writing this article, I decided to write and publish my first library. In this section, we will go over that library, some design choices I made based on what I learned from writing my first library, and how to publish it as a npm package.
 
+<br>
+Here is a link to the Github repository: https://github.com/marjon-call/memLibrary <br>
+This library is heavily written with Yul. Although I will describe what the code is doing, if you would like to get a better understanding of Yul here is a link to an article I published on it: https://medium.com/coinsbench/beginners-guide-to-yul-12a0a18095ef
+
+# Library Overview
+If you have ever worked with memory arrays before in Solidity I am sure you have encountered that you can not use ```push()``` with them. Although not explicitly defined as fixed sized arrays, memory arrays do not allow developers to perform the same operations as dynamic arrays in storage. This library tackles that issue by allowing users to ```push()```, ```pop()```, ```insert()```, and ```remove()``` elements in memory arrays. This library supports the following types: ```uint8[]``` - ```uint256[]```, ```int8[]``` - ```int256[]```, ```address[]```, ```bool[]```, & ```bytes32[]```. For this tutorial, we will only be going over the ```uint256``` type, but all types work the same. For instance ```myAddressArray.push(myAddress)``` and ```myUint256Array.push(myUint256)``` would both work. The reason we are allowed to have the same name for both types is because the function signature look differently so there are no collisions (i.e. ```push(address[], address)``` vs ```push(uint256[],uint256)```. 
+
+Let’s dive into the code now!
+
+# Push()
+```push(uint256[] memory arr, uint256 newVal)``` takes in as the parameters the memory array we want to manipulate and the value we want to append to the end of the array. It returns an array that we store to the old array in our code.
+Here is the example we will use for ```push()```:
+```
+function testPush(uint256[] memory arr) external pure returns(uint256[] memory) {
+    arr = mem.push(arr, 4);
+    return arr;
+}
+```
+I will be passing in the array ```[0, 1, 2, 3]```, and we will see it returns ```[0,1,2,3,4]```.
+Now let’s look at the code!
+```
+// allows user to push value to memory array
+    function push(uint256[] memory arr, uint256 newVal) public pure returns(uint256[] memory) {
+
+        assembly {
+   
+            // where array is stored in memory
+            let location := arr
+   
+            // length of array is stored at arr
+            let length := mload(arr)
+   
+            // gets next available memory location
+            let nextMemoryLocation := add( add( location, 0x20 ), mul( length, 0x20 ) )
+
+            let freeMem := mload(0x40)
+
+            // advance msize()
+            let newMsize := add( freeMem, 0x20 )
+
+            // checks if additional varibales in memory
+            if iszero( eq( freeMem, nextMemoryLocation) ){
+
+                let currVal
+                let prevVal
+               
+                // makes room for _newVal by advacning other memory variables locations by 0x20 (32 bytes)
+                for { let i := nextMemoryLocation } lt(i, newMsize) { i := add(i, 0x20) } {
+                   
+                    currVal := mload(i)
+                    mstore(i, prevVal)
+                    prevVal := currVal
+                   
+                }
+
+            }
+
+            // stores new value to memory
+            mstore(nextMemoryLocation, newVal)
+   
+            // increment length by 1
+            length := add( length, 1 )
+   
+            // store new length value
+            mstore( location, length )
+   
+            // update free memory pointer
+            mstore(0x40, newMsize )
+   
+        }
+
+        return arr;
+        
+    }
+```
+The first thing that happens in this function is we get where, in memory, our array is located. In this case it will be located at memory location ```0x80```. Next we get the length of the array by loading the location from memory. That will return 4. So we know now the next four memory locations will be where our array is stored in memory. However, we need an equation that works despite the size of the array. We need to take our location and add ```0x20``` (this advances us to element 0 of our array by adding 32 bytes). Next we multiply the length of our array (what is being stored in ```0x80``` by 32 bytes). Then we sum these two numbers. Now we store the next memory location for our array to ```nextMemoryLocation```. Now we need to find out if there are any other variables in memory. We do this because we don’t want to overwrite any other variables. This is done by loading the free memory pointer (```0x40```). Since we plan on adding a new variable to memory, we also want to create a new stack variable that keeps track of our free memory pointer after we add a new variable to memory (```newMsize```). Now we check if the free memory pointer is equal to our next memory location for our array. If it is, we do not have to worry about overwriting any memory variables. In our example we do not have to worry about this. In the case that we did have other memory variables, we loop through our memory locations and store each variable in the following memory location. Now, we can store our new memory variable. Then we have to update the length of our array and store that. Finally, we need to update our free memory pointer so Solidity knows not to overwrite our last stored memory location. Now we can return our new array.
+
+
+Now let’s look at our memory layout at the end of our function call.
+|   Memory Location |  Value  |
+|  :---:   | :--- |
+|   0x00  |   Empty  |
+|   0x20  |   Empty  |
+|   0x40  |  ```0x2c0``` (Free memory Pointer) |
+|   0x60  |   Empty  |
+|   0x80  |   4 (size of initial memory array)  |
+|   0xa0  |   0 (```arr[0]```)  |
+|   0xc0  |   1 (```arr[1]```)  |
+|   0xe0  |   2 (```arr[2]```)  |
+|   0x100  |   3 (```arr[3]```)  |
+|   0x120  |   ```0x20``` (Offset, tells us to step over the size of array)  |
+|   0x140  |   5 (new size of array)  |
+|   0x160  |   0 (```arr[0]```)  |
+|   0x180  |   1 (```arr[1]```)  |
+|   0x1a0  |   2 (```arr[2]```)  |
+|   0x1c0  |   3 (```arr[3]```)  |
+|   0x1e0  |   4 (```arr[4]```) [At this point we are returning from library call] |
+|   0x200  |    5 (new size of array)   |
+|   0x220  |   0 (```arr[0]```)  |
+|   0x240  |   1 (```arr[1]```)  |
+|   0x260  |   2 (```arr[2]```)  |
+|   0x280  |   3 (```arr[3]```)  |
+|   0x2a0  |   4 (```arr[4]```)  [We are storing array in ```testPush()```] |
+|   0x2c0  |   ```0x20``` (Offset, tells us to step over the size of array) |
+|   0x2e0  |   5 (new size of array)  |
+|   0x300  |   0 (```arr[0]```)  |
+|   0x320  |   1 (```arr[1]```)  |
+|   0x340  |   2 (```arr[2]```)  |
+|   0x360  |   3 (```arr[3]```)  |
+|   0x380  |   4 (```arr[4]```) [We are returning array from ```testPush()```] |
+
+There is a lot going on in memory right now, let’s go over what's happening. We store our original array to memory. Then, we need to call our library via ```delegatecall()```. There, we format our new array and return it. Remember ```return``` uses memory, and since we are using ```delegatecall()``` the context of the memory is in our calling contract. We now store our new array in ```testPush()```’s memory. Finally, we return our new array, which again uses memory. 
+
+So, obviously, we are using a lot of memory. What would happen if we change our ```push()``` from ```public``` to ```internal```? 
+
+Try it out and this time call our library like this:
+```
+mem.push(arr, 4);
+```
+  Let’s go over the memory in this instance.
+
+|   Memory Location |  Value  |
+|  :---:   | :--- |
+|   0x00  |   Empty  |
+|   0x20  |   Empty  |
+|   0x40  |  ```0x140``` (Free memory Pointer) |
+|   0x60  |   Empty  |
+|   0x80  |   4 (size of new memory array)  |
+|   0xa0  |   0 (```arr[0]```)  |
+|   0xc0  |   1 (```arr[1]```)  |
+|   0xe0  |   2 (```arr[2]```)  |
+|   0x100  |   3 (```arr[3]```)  |
+|   0x120  |   4 (```arr[4]```)  |
+|   0x140  |   ```0x20``` (Offset, tells us to step over the size of array)  |
+|   0x160  |   5 (new size of array) |
+|   0x180  |   0 (```arr[0]```)  |
+|   0x1a0  |   1 (```arr[1]```)  |
+|   0x1c0  |   2 (```arr[2]```)  |
+|   0x1e0  |   3 (```arr[3]```)  |
+|   0x200  |   4 (```arr[4]```)  [We are returning array from ```testPush()```]  |
+
+We just cut down on so much memory! Because we do not need to store our new array variable or return as much data. Clearly this is the better option, right? Well actually this might work better in the case that we only have one memory variable, but let’s change our function to add another memory variable and see what happens. 
+Here is our new ```testPush()```:
+```
+function testPush(uint256[] memory arr) external pure returns(uint256[] memory, uint256[] memory) {
+    uint256[] memory arr2 = new uint256[](1);
+    arr2[0] = 100;
+    mem.push(arr, 4);
+    return (arr, arr2);
+}
+```
+In this example we store another array in memory. It will be stored after the array we want to manipulate, because the array we manipulate is allocated to memory first from our parameters. We then return both arrays. Let’s check out the output:
+```arr```: ```[0,1,2,3,4]```
+```arr2```:  ```[1, 100, 64, 256]```
+So ```arr``` looks great! But ```arr2``` looks a little off. We were expecting ```[100]```. Why does this happen? Internal calls do not execute in the context of our calling function. So when we tell our function to return ```arr2``` it looks at the previously defined memory location for it. We just overwrote that location to be the last element of ```arr``` (4). So now it is returning an array of size 4 for ```arr2```. Even though ```internal``` functions saves on memory allocation, it does not provide the functionality we desire, so we must use ```public``` functions for our library. With that in mind, let’s look at the rest of our functions for our library.
