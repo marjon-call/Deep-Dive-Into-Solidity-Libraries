@@ -184,12 +184,12 @@ To make sure I had a good grasp of libraries before writing this article, I deci
 Here is a link to the Github repository: https://github.com/marjon-call/memLibrary <br>
 This library is heavily written with Yul. Although I will describe what the code is doing, if you would like to get a better understanding of Yul here is a link to an article I published on it: https://medium.com/coinsbench/beginners-guide-to-yul-12a0a18095ef
 
-# Library Overview
+### Library Overview
 If you have ever worked with memory arrays before in Solidity I am sure you have encountered that you can not use ```push()``` with them. Although not explicitly defined as fixed sized arrays, memory arrays do not allow developers to perform the same operations as dynamic arrays in storage. This library tackles that issue by allowing users to ```push()```, ```pop()```, ```insert()```, and ```remove()``` elements in memory arrays. This library supports the following types: ```uint8[]``` - ```uint256[]```, ```int8[]``` - ```int256[]```, ```address[]```, ```bool[]```, & ```bytes32[]```. For this tutorial, we will only be going over the ```uint256``` type, but all types work the same. For instance ```myAddressArray.push(myAddress)``` and ```myUint256Array.push(myUint256)``` would both work. The reason we are allowed to have the same name for both types is because the function signature look differently so there are no collisions (i.e. ```push(address[], address)``` vs ```push(uint256[],uint256)```. 
 
 Let’s dive into the code now!
 
-# Push()
+### Push()
 ```push(uint256[] memory arr, uint256 newVal)``` takes in as the parameters the memory array we want to manipulate and the value we want to append to the end of the array. It returns an array that we store to the old array in our code.
 Here is the example we will use for ```push()```:
 ```
@@ -335,3 +335,154 @@ In this example we store another array in memory. It will be stored after the ar
 ```arr```: ```[0,1,2,3,4]```
 ```arr2```:  ```[1, 100, 64, 256]```
 So ```arr``` looks great! But ```arr2``` looks a little off. We were expecting ```[100]```. Why does this happen? Internal calls do not execute in the context of our calling function. So when we tell our function to return ```arr2``` it looks at the previously defined memory location for it. We just overwrote that location to be the last element of ```arr``` (4). So now it is returning an array of size 4 for ```arr2```. Even though ```internal``` functions saves on memory allocation, it does not provide the functionality we desire, so we must use ```public``` functions for our library. With that in mind, let’s look at the rest of our functions for our library.
+
+### Pop()
+
+Similar to ```push()```, pop manipulates the end of our array. However, instead of appending an element, we will remove the last element of the array. Let’s take a look at our code.
+```
+// removes last element from array
+function pop(uint256[] memory arr) public pure returns (uint256[] memory){
+
+    assembly {
+
+        // where array is stored in memory
+        let location := arr
+
+        // length of array is stored at arr
+        let length := mload(arr)
+
+        let freeMemPntr := mload(0x40)
+
+        let targetLocation := add( add( location, 0x20 ), mul( length, 0x20 ) )
+
+        for { let i := targetLocation } lt( i, freeMemPntr ) { i := add( i, 0x20 )} {
+            // stores next vlaue in memory to current memory location
+            let nextVal := mload( add(i, 0x20 ) )
+            mstore(i, nextVal)
+
+        }
+        
+        // update & store new length
+        length := sub( length, 1 )
+        mstore(location, length)
+    }
+
+    return arr;
+
+}
+```
+Like last time, we get the location and length of our array. We also get the next available free space in memory. Then, we calculate the position of the element that needs to be removed. Next, we loop starting from our element that needs to be removed to our last position in memory. In the loop we store the succeeding value in our current memory location. Finally, we update length and store it before returning our new array.
+
+### Insert()
+```insert()``` allows us to store a new value at a specified index in the array. Here is the code.
+```
+// inserts element into array at index
+function insert(uint256[] memory arr, uint256 newVal, uint256 index) public pure returns(uint256[] memory) {
+
+    assembly {
+
+        // where array is stored in memory
+        let location := arr
+
+        // length of array is stored at arr
+        let length := mload(arr)
+
+        // gets next available memory location
+        let nextMemoryLocation := add( add( location, 0x20 ), mul( length, 0x20 ) )
+       
+        // fre memory pointer
+        let freeMem := mload(0x40)
+
+        // advance msize()
+        let newMsize := add( freeMem, 0x20 )
+        
+        // location we want to insert element
+        let targetLocation := add( add( location, 0x20 ), mul( index, 0x20 ) )
+       
+        let currVal
+        let prevVal
+
+        for { let i := targetLocation } lt( i, newMsize ) { i := add( i, 0x20 )} {
+
+            currVal := mload(i)
+            mstore(i, prevVal)
+            prevVal := currVal
+
+        }
+
+         // stores new value to memory
+        mstore(targetLocation, newVal)
+
+        // increment length by 1
+        length := add( length, 1 )
+
+        // store new length value
+        mstore( location, length )
+
+        // update free memory pointer
+        mstore(0x40, newMsize )
+
+    }
+
+    return arr;
+    
+}
+```
+Exactly like ```push()``` we get ```location```, ```length```, ```nextMemoryLocation```, ```freeMem```, and ```newMsize```. Like with ```pop()```, we get ```targetLocation```. Then starting from ```targetLocation```, we loop to ```newMsize``` replacing each value with the preceding value. After we store our new value, update the length of the array, and update the free memory pointer we can return our new array.
+
+### remove()
+Our last function for our library is ```remove()```. It allows us to remove an element from our array at a specified index. Here is the code for ```remove()```.
+```
+// removes element from array at index
+function remove(uint256[] memory arr, uint256 index) public pure returns (uint256[] memory){
+
+    assembly {
+
+        // where array is stored in memory
+        let location := arr
+
+        // length of array is stored at arr
+        let length := mload(arr)
+
+    	// free memory pointer
+        let freeMemPntr := mload(0x40)
+
+	     // location of element being removed
+        let targetLocation := add( add( location, 0x20 ), mul( index, 0x20 ) )
+
+        for { let i := targetLocation } lt( i, freeMemPntr ) { i := add( i, 0x20 )} {
+
+            let nextVal := mload( add(i, 0x20 ) )
+            mstore(i, nextVal)
+
+        }
+
+        length := sub( length, 1 )
+
+        mstore(location, length)
+        
+    }
+
+    return arr;
+
+}
+```
+
+Yet again we get ```location```, ```length```, ```freeMemPntr```, and ```targetLocation```. Now we loop through our array starting from ```targetLocation``` to  ```freeMemPntr``` and store the preceding value in our current memory location. Finally, we can update and return our new array.
+
+### Publishing Our Library
+Now that we finished writing our Library, we can publish our work with npm. The first step is to make sure we are in the folder with our code in the command line. Next, if we haven't done so yet, we need to create a ```package.json```. That can be done with the following command. <br>
+```npm init -y``` <br>
+Now that we have our ```package.json```. We need to either login or create an npm account with the following command. <br>
+```npm login``` <br>
+Finally we can publish our library with: <br>
+```npm publish``` <br>
+
+Congratulations! You now know how to create and publish libraries with Solidity!
+
+This wraps up the article on Solidity libraries.
+
+Here is the Solidity documentation on libraries: https://docs.soliditylang.org/en/v0.8.17/contracts.html#libraries
+
+If you have any questions, or would like to see me make a tutorial on a different topic please leave a comment below.
+If you would like to support me making tutorials, here is my Ethereum address: 0xD5FC495fC6C0FF327c1E4e3Bccc4B5987e256794.
